@@ -1,0 +1,62 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ORDER_SERVICE_URL=http://order-service:8081
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    depends_on:
+      - order-service
+      - otel-collector
+
+  order-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.order-service
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/orders?sslmode=disable
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=orders
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    ports:
+      - "16686:16686"   # UI
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
